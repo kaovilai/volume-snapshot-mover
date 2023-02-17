@@ -19,6 +19,7 @@ package controllers
 import (
 	"context"
 	"fmt"
+	"strconv"
 	"time"
 
 	k8serrors "k8s.io/apimachinery/pkg/api/errors"
@@ -44,6 +45,8 @@ const ConditionReconciled = "Reconciled"
 const ReconciledReasonError = "Error"
 const ReconciledReasonComplete = "Complete"
 const ReconcileCompleteMessage = "Reconcile complete"
+
+var processingVSBs = 0
 
 // VolumeSnapshotBackupReconciler reconciles a VolumeSnapshotBackup object
 type VolumeSnapshotBackupReconciler struct {
@@ -94,17 +97,84 @@ func (r *VolumeSnapshotBackupReconciler) Reconcile(ctx context.Context, req ctrl
 		Name:      vsb.Name,
 	}
 
+	// move this
+	batchValue, err := GetBackupBatchValue(vsb.Spec.ProtectedNamespace, r.Client)
+	if err != nil {
+		return ctrl.Result{}, err
+	}
+	batchNumber, _ := strconv.Atoi(batchValue)
+
 	// stop reconciling on this resource when completed or failed
 	if vsb.Status.Phase == volsnapmoverv1alpha1.SnapMoverBackupPhaseCompleted ||
 		vsb.Status.Phase == volsnapmoverv1alpha1.SnapMoverBackupPhaseFailed ||
 		vsb.Status.Phase == volsnapmoverv1alpha1.SnapMoverBackupPhasePartiallyFailed {
+
+		// another VSB can be added to processing batch
+		processingVSBs--
+
+		r.Log.Info(fmt.Sprintf("marking volumesnapshotbackup %s batching status as completed", vsb.Name))
+
+		// update once volsync completes instead?
+		vsb.Status.BatchingStatus = volsnapmoverv1alpha1.SnapMoverBackupBatchingCompleted
+		err := r.Status().Update(context.Background(), &vsb)
+		if err != nil {
+			return ctrl.Result{}, err
+		}
+
+		// remove log
+		r.Log.Info(fmt.Sprintf("vsb %v completed, current processing VSBs: %v", vsb.Name, processingVSBs))
+
+		// remove from queue
 		return ctrl.Result{
 			Requeue: false,
 		}, nil
 	}
 
+	// PULL OUT INTO SEPARATE FUNC!!
+	// remove log
+	r.Log.Info(fmt.Sprintf("processing batch num: %v total batch num: %v", processingVSBs, batchNumber))
+
+	// update non-processed VSB as queued
+	if processingVSBs >= batchNumber && len(vsb.Status.BatchingStatus) == 0 {
+
+		r.Log.Info(fmt.Sprintf("marking vsb %v batching status as queued", vsb.Name))
+
+		vsb.Status.BatchingStatus = volsnapmoverv1alpha1.SnapMoverBackupBatchingQueued
+		err := r.Status().Update(context.Background(), &vsb)
+		if err != nil {
+			return ctrl.Result{}, err
+		}
+
+		// requeue VSB is max batch number is still being processed
+	} else if processingVSBs >= batchNumber &&
+		vsb.Status.BatchingStatus == volsnapmoverv1alpha1.SnapMoverBackupBatchingQueued {
+
+		// remove log
+		r.Log.Info(fmt.Sprintf("requeuing vsb %v as max vsbs are being processed", vsb.Name))
+
+		// longer time?
+		return ctrl.Result{Requeue: true, RequeueAfter: 7 * time.Second}, nil
+
+		// add a queued VSB to processing batch
+	} else if processingVSBs < batchNumber && (vsb.Status.BatchingStatus == "" ||
+		vsb.Status.BatchingStatus == volsnapmoverv1alpha1.SnapMoverBackupBatchingQueued) {
+
+		processingVSBs++
+
+		r.Log.Info(fmt.Sprintf("marking vsb %v batching status as processing", vsb.Name))
+
+		vsb.Status.BatchingStatus = volsnapmoverv1alpha1.SnapMoverBackupBatchingProcessing
+		err := r.Status().Update(context.Background(), &vsb)
+		if err != nil {
+			return ctrl.Result{}, err
+		}
+	}
+
 	// Run through all reconcilers associated with VSB needs
 	// Reconciliation logic
+
+	// remove log
+	r.Log.Info(fmt.Sprintf("processing VSB %v, current processing VSBs: %v", vsb.Name, processingVSBs))
 
 	reconFlag, err := ReconcileBatch(r.Log,
 		r.ValidateVolumeSnapshotMoverBackup,
