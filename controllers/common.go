@@ -572,26 +572,3 @@ func GetRestoreBatchValue(namespace string, client client.Client) (string, error
 
 	return restoreBatchValue, nil
 }
-
-// func (r *VolumeSnapshotBackupReconciler) getVSBProgressList(namespace string, batchSize int, currentVSBs int) ([]volsnapmoverv1alpha1.VolumeSnapshotBackup, error) {
-
-// 	vsbQueue := make([]volsnapmoverv1alpha1.VolumeSnapshotBackup, batchSize)
-// 	vsbList := volsnapmoverv1alpha1.VolumeSnapshotBackupList{}
-
-// 	err := r.List(context.TODO(), &vsbList, &client.ListOptions{})
-// 	if err != nil {
-// 		return nil, err
-// 	}
-
-// 	// add to queue if batch size is less than current number of VSBs being processed
-// 	if len(vsbList.Items) > 0 && batchSize < currentVSBs {
-
-// 		for i := range vsbList.Items {
-// 			if vsbList.Items[i].Status.Phase == "" {
-// 				vsbQueue = append(vsbQueue, vsbList.Items[i])
-// 			}
-// 		}
-// 	}
-
-// 	return vsbQueue, nil
-// }
