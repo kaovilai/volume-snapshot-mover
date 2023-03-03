@@ -134,6 +134,7 @@ func (r *VolumeSnapshotBackupReconciler) Reconcile(ctx context.Context, req ctrl
 
 		// requeue VSB if max batch number is still being processed
 	} else if processingVSBs >= VSBBatchNumber && vsb.Status.BatchingStatus == volsnapmoverv1alpha1.SnapMoverBackupBatchingQueued {
+		r.Log.Info(fmt.Sprintf("requeuing vsb %v as max batch number %v is still being processed: %v", vsb.Name, VSBBatchNumber, processingVSBs))
 		return ctrl.Result{Requeue: true, RequeueAfter: 5 * time.Second}, nil
 
 		// add a queued VSB to processing batch
